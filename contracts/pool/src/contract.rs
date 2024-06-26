@@ -1,4 +1,5 @@
 use crate::errors::PoolError;
+use crate::interfaces::{PoolContractInterface, UpgradeableContract};
 use crate::storage::{
     add_proxy_wallet, add_swap_request, get_active_swap_requests,
     get_completed_swap_requests_last_page, get_completed_swap_requests_page, get_destinations,
@@ -14,58 +15,9 @@ use soroban_sdk::{contract, contractimpl, panic_with_error, Address, BytesN, Env
 #[contract]
 pub struct PoolContract;
 
-pub trait PoolContractInterface {
-    fn set_admin(e: Env, admin: Address);
-
-    fn set_operator(e: Env, operator: Address);
-    fn add_proxy_wallet(e: Env, proxy_wallet: Address, token_out: Address);
-    fn get_proxy_wallets(e: Env) -> Map<Address, Address>;
-
-    fn set_swap_router(e: Env, swap_router: Address);
-
-    fn add_request(
-        e: Env,
-        proxy_wallet: Address,
-        tx_id: BytesN<32>,
-        op_id: u128,
-        destination: Address,
-        token_in: Address,
-        amount_in: i128,
-    );
-
-    fn swap_chained_via_router(
-        e: Env,
-        operator: Address,
-        destination: Address,
-        op_id: u128,
-        swaps_chain: Vec<(Vec<Address>, BytesN<32>, Address)>,
-        out_min: i128,
-    ) -> i128; // getters
-               // get_swap by id
-               // get operator
-               // get swap router
-
-    fn get_last_operation_id(e: Env) -> u128;
-    fn get_requests(
-        e: Env,
-        destination: Address,
-    ) -> Vec<(BytesN<32>, u128, Address, Address, i128, Address)>;
-    fn get_completed_requests_last_page(e: Env, destination: Address) -> u32;
-    fn get_completed_requests(
-        e: Env,
-        destination: Address,
-        page: u32,
-    ) -> Vec<(BytesN<32>, u128, Address, Address, i128, Address, i128)>;
-    fn get_destinations_last_page(e: Env) -> u32;
-    fn get_destinations(e: Env, page: u32) -> Vec<Address>;
-}
-
 #[contractimpl]
 impl PoolContractInterface for PoolContract {
     // admin methods
-    // init: set admin
-    // set swap router
-    // set operator (the account capable of adding new swaps & executing them)
     fn set_admin(e: Env, admin: Address) {
         let access_control = AccessControl::new(&e);
         if access_control.has_admin() {
@@ -84,10 +36,6 @@ impl PoolContractInterface for PoolContract {
         let access_control = AccessControl::new(&e);
         access_control.require_admin();
         add_proxy_wallet(&e, &proxy_wallet, &token_out);
-    }
-
-    fn get_proxy_wallets(e: Env) -> Map<Address, Address> {
-        get_proxy_wallets(&e)
     }
 
     fn set_swap_router(e: Env, swap_router: Address) {
@@ -182,10 +130,10 @@ impl PoolContractInterface for PoolContract {
         amount_out
     }
 
-    // getters
-    // get_swap by id
-    // get operator
-    // get swap router
+    // public getters
+    fn get_proxy_wallets(e: Env) -> Map<Address, Address> {
+        get_proxy_wallets(&e)
+    }
 
     fn get_last_operation_id(e: Env) -> u128 {
         get_last_operation_id(&e)
@@ -239,5 +187,18 @@ impl PoolContractInterface for PoolContract {
 
     fn get_destinations(e: Env, page: u32) -> Vec<Address> {
         get_destinations(&e, page)
+    }
+}
+
+#[contractimpl]
+impl UpgradeableContract for PoolContract {
+    fn version() -> u32 {
+        104
+    }
+
+    fn upgrade(e: Env, new_wasm_hash: BytesN<32>) {
+        let access_control = AccessControl::new(&e);
+        access_control.require_admin();
+        e.deployer().update_current_contract_wasm(new_wasm_hash);
     }
 }
