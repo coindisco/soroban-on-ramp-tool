@@ -1,12 +1,15 @@
 use crate::errors::PoolError;
 use crate::storage::{
-    add_swap_request, get_last_operation_id, get_operator, get_swap_request_by_id, get_swap_router,
-    set_operator, set_swap_request_processed, set_swap_router, SwapRequest,
+    add_proxy_wallet, add_swap_request, get_active_swap_requests,
+    get_completed_swap_requests_last_page, get_completed_swap_requests_page, get_destinations,
+    get_destinations_last_page, get_last_operation_id, get_operator, get_proxy_wallets,
+    get_swap_request_by_id, get_swap_router, set_operator, set_swap_request_processed,
+    set_swap_router, SwapRequest,
 };
 use crate::swap_router::swap_with_router;
 use access_control::access::{AccessControl, AccessControlTrait};
 use soroban_sdk::token::TokenClient as SorobanTokenClient;
-use soroban_sdk::{contract, contractimpl, panic_with_error, Address, BytesN, Env, Vec};
+use soroban_sdk::{contract, contractimpl, panic_with_error, Address, BytesN, Env, Map, Vec};
 
 #[contract]
 pub struct PoolContract;
@@ -15,10 +18,12 @@ pub trait PoolContractInterface {
     fn set_admin(e: Env, admin: Address);
 
     fn set_operator(e: Env, operator: Address);
+    fn add_proxy_wallet(e: Env, proxy_wallet: Address, token_out: Address);
+    fn get_proxy_wallets(e: Env) -> Map<Address, Address>;
 
     fn set_swap_router(e: Env, swap_router: Address);
 
-    fn request_swap(
+    fn add_request(
         e: Env,
         proxy_wallet: Address,
         tx_id: BytesN<32>,
@@ -26,7 +31,6 @@ pub trait PoolContractInterface {
         destination: Address,
         token_in: Address,
         amount_in: i128,
-        token_out: Address,
     );
 
     fn swap_chained_via_router(
@@ -42,6 +46,18 @@ pub trait PoolContractInterface {
                // get swap router
 
     fn get_last_operation_id(e: Env) -> u128;
+    fn get_requests(
+        e: Env,
+        destination: Address,
+    ) -> Vec<(BytesN<32>, u128, Address, Address, i128, Address)>;
+    fn get_completed_requests_last_page(e: Env, destination: Address) -> u32;
+    fn get_completed_requests(
+        e: Env,
+        destination: Address,
+        page: u32,
+    ) -> Vec<(BytesN<32>, u128, Address, Address, i128, Address, i128)>;
+    fn get_destinations_last_page(e: Env) -> u32;
+    fn get_destinations(e: Env, page: u32) -> Vec<Address>;
 }
 
 #[contractimpl]
@@ -64,13 +80,23 @@ impl PoolContractInterface for PoolContract {
         set_operator(&e, &operator);
     }
 
+    fn add_proxy_wallet(e: Env, proxy_wallet: Address, token_out: Address) {
+        let access_control = AccessControl::new(&e);
+        access_control.require_admin();
+        add_proxy_wallet(&e, &proxy_wallet, &token_out);
+    }
+
+    fn get_proxy_wallets(e: Env) -> Map<Address, Address> {
+        get_proxy_wallets(&e)
+    }
+
     fn set_swap_router(e: Env, swap_router: Address) {
         let access_control = AccessControl::new(&e);
         access_control.require_admin();
         set_swap_router(&e, &swap_router);
     }
 
-    fn request_swap(
+    fn add_request(
         e: Env,
         proxy_wallet: Address,
         tx_id: BytesN<32>,
@@ -78,10 +104,16 @@ impl PoolContractInterface for PoolContract {
         destination: Address,
         token_in: Address,
         amount_in: i128,
-        token_out: Address,
     ) {
+        // check proxy permissions
         proxy_wallet.require_auth();
-        // todo: check if proxy_wallet is allowed
+        let proxy_wallets = get_proxy_wallets(&e);
+        let token_out = match proxy_wallets.get(proxy_wallet.clone()) {
+            Some(value) => value,
+            None => {
+                panic_with_error!(&e, PoolError::UnauthorizedProxyWallet);
+            }
+        };
 
         // check if operation id already consumed
         if op_id <= get_last_operation_id(&e) {
@@ -157,5 +189,55 @@ impl PoolContractInterface for PoolContract {
 
     fn get_last_operation_id(e: Env) -> u128 {
         get_last_operation_id(&e)
+    }
+
+    fn get_requests(
+        e: Env,
+        destination: Address,
+    ) -> Vec<(BytesN<32>, u128, Address, Address, i128, Address)> {
+        let mut result = Vec::new(&e);
+        for request in get_active_swap_requests(&e, &destination) {
+            result.push_back((
+                request.tx_id,
+                request.op_id,
+                request.destination,
+                request.token_in,
+                request.amount_in,
+                request.token_out,
+            ));
+        }
+        result
+    }
+
+    fn get_completed_requests_last_page(e: Env, destination: Address) -> u32 {
+        get_completed_swap_requests_last_page(&e, &destination)
+    }
+
+    fn get_completed_requests(
+        e: Env,
+        destination: Address,
+        page: u32,
+    ) -> Vec<(BytesN<32>, u128, Address, Address, i128, Address, i128)> {
+        let mut result = Vec::new(&e);
+        for request in get_completed_swap_requests_page(&e, &destination, page) {
+            result.push_back((
+                request.tx_id,
+                request.op_id,
+                request.destination,
+                request.token_in,
+                request.amount_in,
+                request.token_out,
+                request.amount_out,
+            ));
+        }
+        result
+    }
+
+    fn get_destinations_last_page(e: Env) -> u32 {
+        get_destinations_last_page(&e)
+    }
+
+    fn get_destinations(e: Env, page: u32) -> Vec<Address> {
+        get_destinations(&e, page)
     }
 }
