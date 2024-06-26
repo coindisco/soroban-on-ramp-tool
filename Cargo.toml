@@ -1,0 +1,30 @@
+[workspace]
+resolver = "2"
+members = [
+  "contracts/*",
+]
+
+[workspace.package]
+version = "0.1.0"
+
+[workspace.dependencies]
+soroban-sdk = "21.1.1"
+paste = { version = "1.0.15" }
+utils = { path = "contracts/utils" }
+access_control = { path = "contracts/access_control" }
+
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+debug = 0
+strip = "symbols"
+debug-assertions = false
+panic = "abort"
+codegen-units = 1
+lto = true
+
+# For more information about this profile see https://soroban.stellar.org/docs/basic-tutorials/logging#cargotoml-profile
+[profile.release-with-logs]
+inherits = "release"
+debug-assertions = true
