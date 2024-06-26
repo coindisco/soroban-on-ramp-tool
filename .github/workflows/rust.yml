@@ -1,0 +1,26 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "master", "develop", "audit" ]
+  pull_request:
+    branches: [ "master", "develop", "audit" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install Task
+      uses: arduino/setup-task@v1
+    - name: Install Soroban
+      run: cargo install --locked --version 21.0.0 soroban-cli --features opt
+    - name: Check code formatting
+      run: task fmt && git diff --exit-code
+    - name: Run tests
+      run: task test
