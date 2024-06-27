@@ -11,6 +11,7 @@ pub trait PoolContractInterface {
 
     fn add_request(
         e: Env,
+        operator: Address,
         proxy_wallet: Address,
         tx_id: BytesN<32>,
         op_id: u128,

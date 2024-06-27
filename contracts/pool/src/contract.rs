@@ -46,6 +46,7 @@ impl PoolContractInterface for PoolContract {
 
     fn add_request(
         e: Env,
+        operator: Address,
         proxy_wallet: Address,
         tx_id: BytesN<32>,
         op_id: u128,
@@ -54,7 +55,7 @@ impl PoolContractInterface for PoolContract {
         amount_in: i128,
     ) {
         // check proxy permissions
-        proxy_wallet.require_auth();
+        operator.require_auth();
         let proxy_wallets = get_proxy_wallets(&e);
         let token_out = match proxy_wallets.get(proxy_wallet.clone()) {
             Some(value) => value,
@@ -68,7 +69,8 @@ impl PoolContractInterface for PoolContract {
             panic_with_error!(&e, PoolError::OperationIdAlreadyConsumed);
         }
 
-        SorobanTokenClient::new(&e, &token_in).transfer(
+        SorobanTokenClient::new(&e, &token_in).transfer_from(
+            &e.current_contract_address(),
             &proxy_wallet,
             &e.current_contract_address(),
             &amount_in,

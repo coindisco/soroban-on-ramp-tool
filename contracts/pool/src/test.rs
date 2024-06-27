@@ -139,6 +139,11 @@ fn test_chained_swap() {
     assert_eq!(token2.balance(&destination), 0);
     assert_eq!(token3.balance(&destination), 0);
 
+    // approve tokens for proxy wallet & then lock it
+    token1
+        .mock_all_auths()
+        .approve(&proxy_wallet, &swap_pool.address, &i128::MAX, &9999);
+
     // init swap
     let operation_id = 1;
     let token_in = tokens[0].clone();
@@ -158,14 +163,37 @@ fn test_chained_swap() {
     );
     assert_eq!(swap_pool.get_destinations(&0), Vec::new(&e));
 
-    swap_pool.mock_all_auths().add_request(
-        &proxy_wallet,
-        &BytesN::from_array(&e, &[0; 32]),
-        &operation_id,
-        &destination,
-        &token_in,
-        &100,
-    );
+    swap_pool
+        .mock_auths(&[MockAuth {
+            address: &operator,
+            invoke: &MockAuthInvoke {
+                contract: &swap_pool.address,
+                fn_name: "add_request",
+                args: Vec::from_array(
+                    &e,
+                    [
+                        operator.to_val(),
+                        proxy_wallet.to_val(),
+                        BytesN::from_array(&e, &[0; 32]).into_val(&e),
+                        operation_id.into_val(&e),
+                        destination.to_val(),
+                        token_in.to_val(),
+                        100_i128.into_val(&e),
+                    ],
+                )
+                .into_val(&e),
+                sub_invokes: &[],
+            },
+        }])
+        .add_request(
+            &operator,
+            &proxy_wallet,
+            &BytesN::from_array(&e, &[0; 32]),
+            &operation_id,
+            &destination,
+            &token_in,
+            &100,
+        );
 
     // check storage
     assert_eq!(
@@ -289,6 +317,7 @@ fn test_unregistered_proxy_wallet() {
         .add_proxy_wallet(&Address::generate(&e), &token_out);
 
     swap_pool.mock_all_auths().add_request(
+        &operator,
         &proxy_wallet,
         &BytesN::from_array(&e, &[0; 32]),
         &1,
