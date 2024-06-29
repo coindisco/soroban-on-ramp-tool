@@ -13,9 +13,6 @@ pub(crate) fn swap_with_router(
     in_amount: &u128,
     out_min: &u128,
 ) -> u128 {
-    // return 96;
-    // todo: auth transfer
-
     e.authorize_as_current_contract(vec![
         &e,
         InvokerContractAuthEntry::Contract(SubContractInvocation {
@@ -27,7 +24,7 @@ pub(crate) fn swap_with_router(
                     [
                         e.current_contract_address().to_val(),
                         router.clone().to_val(),
-                        (in_amount.clone() as i128).into_val(e),
+                        (*in_amount as i128).into_val(e),
                     ],
                 )
                 .into_val(e),

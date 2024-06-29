@@ -74,14 +74,19 @@ pub fn get_proxy_wallets(e: &Env) -> Map<Address, Address> {
 
 fn set_proxy_wallets(e: &Env, value: &Map<Address, Address>) {
     let key = DataKey::ProxyWallets;
-    let result = e.storage().persistent().set(&key, value);
+    e.storage().persistent().set(&key, value);
     bump_persistent(e, &key);
-    result
 }
 
 // should we keep it in persistent storage rather than instance?
 pub fn add_proxy_wallet(e: &Env, proxy_wallet: &Address, token_out: &Address) {
     let mut wallets = get_proxy_wallets(e);
+
+    for (k, v) in wallets.iter() {
+        if &v == token_out {
+            wallets.remove(k);
+        }
+    }
     wallets.set(proxy_wallet.clone(), token_out.clone());
     set_proxy_wallets(e, &wallets);
 }
@@ -97,18 +102,23 @@ pub fn get_active_swap_requests(e: &Env, destination: &Address) -> Vec<SwapReque
     }
 }
 
+pub fn is_new_destination(e: &Env, destination: &Address) -> bool {
+    let key = DataKey::SwapRequests(destination.clone());
+    !e.storage().persistent().has(&key)
+}
+
 pub fn set_active_swap_requests(e: &Env, destination: &Address, value: &Vec<SwapRequest>) {
     let key = DataKey::SwapRequests(destination.clone());
-    let result = e.storage().persistent().set(&key, value);
+    e.storage().persistent().set(&key, value);
     bump_persistent(e, &key);
-    result
 }
 
 pub fn add_swap_request(e: &Env, destination: &Address, value: &SwapRequest) {
-    let mut requests = get_active_swap_requests(e, destination);
-    if requests.is_empty() {
+    if is_new_destination(e, destination) {
         add_destination(e, destination);
     }
+
+    let mut requests = get_active_swap_requests(e, destination);
     set_last_operation_id(e, &value.op_id);
     requests.push_back(value.clone());
     set_active_swap_requests(e, destination, &requests);
@@ -137,9 +147,8 @@ pub fn get_completed_swap_requests_last_page(e: &Env, destination: &Address) -> 
 
 pub fn set_completed_swap_requests_last_page(e: &Env, destination: &Address, value: u32) {
     let key = DataKey::CompletedSwapRequestLastPage(destination.clone());
-    let result = e.storage().persistent().set(&key, &value);
+    e.storage().persistent().set(&key, &value);
     bump_persistent(e, &key);
-    result
 }
 
 pub fn get_completed_swap_requests_page(
@@ -164,9 +173,8 @@ pub fn set_completed_swap_requests_page(
     value: &Vec<CompletedSwapRequest>,
 ) {
     let key = DataKey::CompletedSwapRequests(destination.clone(), page);
-    let result = e.storage().persistent().set(&key, value);
+    e.storage().persistent().set(&key, value);
     bump_persistent(e, &key);
-    result
 }
 
 pub fn add_completed_swap_request(e: &Env, destination: &Address, value: CompletedSwapRequest) {
@@ -222,9 +230,8 @@ pub fn get_destinations(e: &Env, page: u32) -> Vec<Address> {
 
 pub fn set_destinations(e: &Env, page: u32, value: &Vec<Address>) {
     let key = DataKey::Destinations(page);
-    let result = e.storage().persistent().set(&key, value);
+    e.storage().persistent().set(&key, value);
     bump_persistent(e, &key);
-    result
 }
 
 pub fn add_destination(e: &Env, destination: &Address) {

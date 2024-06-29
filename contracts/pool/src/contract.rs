@@ -54,8 +54,12 @@ impl PoolContractInterface for PoolContract {
         token_in: Address,
         amount_in: i128,
     ) {
-        // check proxy permissions
+        // check operator is whitelisted
         operator.require_auth();
+        if operator != get_operator(&e) {
+            panic_with_error!(&e, PoolError::UnauthorizedOperator);
+        }
+
         let proxy_wallets = get_proxy_wallets(&e);
         let token_out = match proxy_wallets.get(proxy_wallet.clone()) {
             Some(value) => value,

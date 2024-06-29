@@ -8,7 +8,7 @@ use soroban_sdk::testutils::{
 use soroban_sdk::token::{
     StellarAssetClient as SorobanTokenAdminClient, TokenClient as SorobanTokenClient,
 };
-use soroban_sdk::{vec, Address, BytesN, Env, IntoVal, Symbol, Vec};
+use soroban_sdk::{vec, Address, BytesN, Env, IntoVal, Map, Symbol, Vec};
 
 fn create_token_contract<'a>(e: &Env, admin: &Address) -> SorobanTokenClient<'a> {
     SorobanTokenClient::new(e, &e.register_stellar_asset_contract(admin.clone()))
@@ -295,11 +295,153 @@ fn test_chained_swap() {
     );
 }
 
+#[test]
+fn test_duplicate_destination() {
+    let e = Env::default();
+    e.budget().reset_unlimited();
+    e.mock_all_auths();
+
+    let admin = Address::generate(&e);
+    let proxy_wallet = Address::generate(&e);
+    let operator = Address::generate(&e);
+    let destination = Address::generate(&e);
+
+    let mut tokens = std::vec![
+        create_token_contract(&e, &admin).address,
+        create_token_contract(&e, &admin).address,
+    ];
+    tokens.sort();
+    let token1 = SorobanTokenClient::new(&e, &tokens[0]);
+    let _token2 = SorobanTokenClient::new(&e, &tokens[1]);
+    let token1_admin = SorobanTokenAdminClient::new(&e, &tokens[0]);
+    let token2_admin = SorobanTokenAdminClient::new(&e, &tokens[1]);
+
+    let tokens1 = Vec::from_array(&e, [tokens[0].clone(), tokens[1].clone()]);
+
+    // init swap router with all it's complexity
+    let pool_hash = install_liq_pool_hash(&e);
+    let token_hash = install_token_wasm(&e);
+    let plane = deploy_plane_contract(&e);
+    let swap_router = deploy_swap_calculator_contract(&e);
+    swap_router.init_admin(&admin);
+    swap_router.set_pools_plane(&admin, &plane);
+    let router = deploy_liqpool_router_contract(&e);
+    router.init_admin(&admin);
+    router.set_pool_hash(&pool_hash);
+    router.set_stableswap_pool_hash(&install_stableswap_liq_pool_hash(&e));
+    router.set_token_hash(&token_hash);
+    router.set_reward_token(&token1.address);
+    router.set_pools_plane(&admin, &plane);
+    router.set_swap_router(&admin, &swap_router.address);
+
+    // init pools & deposit
+    let (pool_index1, _pool_address1) = router.init_standard_pool(&admin, &tokens1, &30);
+    token1_admin.mint(&admin, &10000);
+    token2_admin.mint(&admin, &20000);
+    router.deposit(
+        &admin,
+        &tokens1,
+        &pool_index1,
+        &Vec::from_array(&e, [10000, 10000]),
+        &0,
+    );
+
+    // init current contract
+    let swap_pool = deploy_swap_pool(&e);
+    swap_pool.set_admin(&admin);
+    swap_pool.set_operator(&operator);
+    swap_pool.set_swap_router(&router.address);
+    swap_pool.add_proxy_wallet(&proxy_wallet, &tokens[1]);
+
+    // approve tokens for proxy wallet & then lock it
+    token1.approve(&proxy_wallet, &swap_pool.address, &i128::MAX, &9999);
+
+    // init swap
+    let mut operation_id = 1;
+    let token_in = tokens[0].clone();
+    let swaps_chain = Vec::from_array(
+        &e,
+        [(tokens1.clone(), pool_index1.clone(), tokens[1].clone())],
+    );
+    token1_admin.mint(&proxy_wallet, &200);
+
+    assert_eq!(swap_pool.get_destinations(&0), Vec::new(&e));
+
+    swap_pool.add_request(
+        &operator,
+        &proxy_wallet,
+        &BytesN::from_array(&e, &[0; 32]),
+        &operation_id,
+        &destination,
+        &token_in,
+        &100,
+    );
+    swap_pool.swap_chained_via_router(&operator, &destination, &operation_id, &swaps_chain, &90);
+
+    operation_id += 1;
+    swap_pool.add_request(
+        &operator,
+        &proxy_wallet,
+        &BytesN::from_array(&e, &[0; 32]),
+        &operation_id,
+        &destination,
+        &token_in,
+        &100,
+    );
+    swap_pool.swap_chained_via_router(&operator, &destination, &operation_id, &swaps_chain, &90);
+
+    // check storage
+    assert_eq!(swap_pool.get_destinations_last_page(), 0);
+    assert_eq!(
+        swap_pool.get_destinations(&0),
+        vec![&e, destination.clone()]
+    );
+}
+
+#[test]
+fn test_overwrite_wallet() {
+    let e = Env::default();
+    e.budget().reset_unlimited();
+    e.mock_all_auths();
+
+    let admin = Address::generate(&e);
+    let proxy_wallet1 = Address::generate(&e);
+    let proxy_wallet2 = Address::generate(&e);
+    let proxy_wallet3 = Address::generate(&e);
+    let token1 = create_token_contract(&e, &admin).address;
+    let token2 = create_token_contract(&e, &admin).address;
+
+    let swap_pool = deploy_swap_pool(&e);
+    swap_pool.set_admin(&admin);
+    swap_pool.add_proxy_wallet(&proxy_wallet1, &token1);
+    assert_eq!(
+        swap_pool.get_proxy_wallets(),
+        Map::from_array(&e, [(proxy_wallet1, token1.clone())])
+    );
+    swap_pool.add_proxy_wallet(&proxy_wallet2, &token1);
+    assert_eq!(
+        swap_pool.get_proxy_wallets(),
+        Map::from_array(&e, [(proxy_wallet2.clone(), token1.clone())])
+    );
+    swap_pool.add_proxy_wallet(&proxy_wallet3, &token2);
+    assert_eq!(
+        swap_pool.get_proxy_wallets(),
+        Map::from_array(
+            &e,
+            [
+                (proxy_wallet2, token1.clone()),
+                (proxy_wallet3, token2.clone())
+            ]
+        )
+    );
+}
+
 #[should_panic(expected = "Error(Contract, #2303)")]
 #[test]
 fn test_unregistered_proxy_wallet() {
     let e = Env::default();
     e.budget().reset_unlimited();
+    e.mock_all_auths();
 
     let admin = Address::generate(&e);
     let proxy_wallet = Address::generate(&e);
@@ -310,13 +452,11 @@ fn test_unregistered_proxy_wallet() {
 
     // init current contract
     let swap_pool = deploy_swap_pool(&e);
-    swap_pool.mock_all_auths().set_admin(&admin);
-    swap_pool.mock_all_auths().set_operator(&operator);
-    swap_pool
-        .mock_all_auths()
-        .add_proxy_wallet(&Address::generate(&e), &token_out);
+    swap_pool.set_admin(&admin);
+    swap_pool.set_operator(&operator);
+    swap_pool.add_proxy_wallet(&Address::generate(&e), &token_out);
 
-    swap_pool.mock_all_auths().add_request(
+    swap_pool.add_request(
         &operator,
         &proxy_wallet,
         &BytesN::from_array(&e, &[0; 32]),
