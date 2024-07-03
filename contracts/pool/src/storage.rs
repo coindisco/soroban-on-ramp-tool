@@ -264,7 +264,23 @@ fn generate_next_memo(e: &Env, memo_str: &String) -> String {
     String::from_bytes(e, &memo::generate_next_memo(&memo_bytes))
 }
 
+pub fn has_user_memo(e: &Env, user: &Address, token: &Address) -> bool {
+    let key = DataKey::UserMemo(user.clone(), token.clone());
+    e.storage().persistent().has(&key)
+}
+
 pub fn get_user_memo(e: &Env, user: &Address, token: &Address) -> String {
+    let key = DataKey::UserMemo(user.clone(), token.clone());
+    match e.storage().persistent().get(&key) {
+        Some(v) => {
+            bump_persistent(e, &key);
+            v
+        }
+        None => panic_with_error!(e, StorageError::ValueMissing),
+    }
+}
+
+pub fn get_or_generate_user_memo(e: &Env, user: &Address, token: &Address) -> String {
     let key = DataKey::UserMemo(user.clone(), token.clone());
     match e.storage().persistent().get(&key) {
         Some(v) => {

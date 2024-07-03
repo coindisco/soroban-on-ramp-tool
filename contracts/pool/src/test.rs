@@ -75,7 +75,7 @@ fn test_memo() {
     for i in 0..iterations {
         let user = Address::generate(&e);
         let token = Address::generate(&e);
-        let memo = swap_pool.get_user_memo(&user, &token);
+        let memo = swap_pool.generate_user_memo(&user, &token);
         // println!("{:?}", memo.to_string());
         if i % step == 0 {
             assert_eq!(memo, String::from_str(&e, expected_memo[i / step]))
@@ -93,13 +93,40 @@ fn test_memo_generation() {
     let user2 = Address::generate(&e);
     let token1 = Address::generate(&e);
     let token2 = Address::generate(&e);
-    let memo1 = swap_pool.get_user_memo(&user1, &token1);
-    let memo2 = swap_pool.get_user_memo(&user1, &token2);
-    let memo3 = swap_pool.get_user_memo(&user2, &token1);
+
+    assert_eq!(swap_pool.has_user_memo(&user1, &token1), false);
+    assert_eq!(swap_pool.has_user_memo(&user1, &token2), false);
+    assert_eq!(swap_pool.has_user_memo(&user2, &token1), false);
+
+    let memo1 = swap_pool.generate_user_memo(&user1, &token1);
+    assert_eq!(swap_pool.has_user_memo(&user1, &token1), true);
+
+    let memo2 = swap_pool.generate_user_memo(&user1, &token2);
+    let memo3 = swap_pool.generate_user_memo(&user2, &token1);
+
     assert_ne!(memo1, memo2);
     assert_ne!(memo1, memo3);
     assert_ne!(memo2, memo3);
+
+    assert_eq!(swap_pool.has_user_memo(&user1, &token2), true);
+    assert_eq!(swap_pool.has_user_memo(&user2, &token1), true);
+
+    // duplicate memo should not be created even if generator called twice
+    assert_eq!(memo1, swap_pool.generate_user_memo(&user1, &token1));
+
     assert_eq!(memo1, swap_pool.get_user_memo(&user1, &token1));
+}
+
+#[should_panic(expected = "Error(Contract, #502)")]
+#[test]
+fn test_get_memo_if_not_exists() {
+    // memo should be unique for every user & token pair but should not change for the same pair
+    let e = Env::default();
+    e.budget().reset_unlimited();
+    let swap_pool = deploy_swap_pool(&e);
+    let user = Address::generate(&e);
+    let token = Address::generate(&e);
+    swap_pool.get_user_memo(&user, &token);
 }
 
 #[test]
@@ -236,7 +263,7 @@ fn test_chained_swap() {
     );
     assert_eq!(swap_pool.get_destinations(&0), Vec::new(&e));
 
-    let memo = swap_pool.get_user_memo(&destination, &tokens[2]);
+    let memo = swap_pool.generate_user_memo(&destination, &tokens[2]);
 
     swap_pool
         .mock_auths(&[MockAuth {
@@ -441,7 +468,7 @@ fn test_duplicate_destination() {
 
     assert_eq!(swap_pool.get_destinations(&0), Vec::new(&e));
 
-    let memo = swap_pool.get_user_memo(&destination, &token_out);
+    let memo = swap_pool.generate_user_memo(&destination, &token_out);
     swap_pool.add_request(
         &operator,
         &BytesN::from_array(&e, &[0; 32]),

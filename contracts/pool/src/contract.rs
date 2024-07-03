@@ -3,9 +3,9 @@ use crate::interfaces::{PoolContractInterface, UpgradeableContract};
 use crate::storage::{
     add_swap_request, get_active_swap_requests, get_completed_swap_requests_last_page,
     get_completed_swap_requests_page, get_destinations, get_destinations_last_page,
-    get_last_operation_id, get_operator, get_proxy_wallet, get_swap_request_by_id, get_swap_router,
-    get_user_memo, get_user_token_by_memo, set_operator, set_proxy_wallet,
-    set_swap_request_processed, set_swap_router, SwapRequest,
+    get_last_operation_id, get_operator, get_or_generate_user_memo, get_proxy_wallet,
+    get_swap_request_by_id, get_swap_router, get_user_memo, get_user_token_by_memo, has_user_memo,
+    set_operator, set_proxy_wallet, set_swap_request_processed, set_swap_router, SwapRequest,
 };
 use crate::swap_router::swap_with_router;
 use access_control::access::{AccessControl, AccessControlTrait};
@@ -44,8 +44,18 @@ impl PoolContractInterface for PoolContract {
         set_swap_router(&e, &swap_router);
     }
 
+    fn has_user_memo(e: Env, user: Address, token: Address) -> bool {
+        has_user_memo(&e, &user, &token)
+    }
+
     fn get_user_memo(e: Env, user: Address, token: Address) -> String {
+        // don't generate user memo if it doesn't exist to avoid simulated memo which doesn't exist
         get_user_memo(&e, &user, &token)
+    }
+
+    fn generate_user_memo(e: Env, user: Address, token: Address) -> String {
+        // explicit call to generate memo. if user is willing to pay twice - it's okay, duplicate won't be created
+        get_or_generate_user_memo(&e, &user, &token)
     }
 
     fn add_request(

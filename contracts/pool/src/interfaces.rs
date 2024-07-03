@@ -45,6 +45,8 @@ pub trait PoolContractInterface {
     fn get_destinations_last_page(e: Env) -> u32;
     fn get_destinations(e: Env, page: u32) -> Vec<Address>;
     fn get_user_memo(e: Env, user: Address, token: Address) -> String;
+    fn has_user_memo(e: Env, user: Address, token: Address) -> bool;
+    fn generate_user_memo(e: Env, user: Address, token: Address) -> String;
 }
 
 pub trait UpgradeableContract {
