@@ -9,5 +9,4 @@ pub enum PoolError {
     OperationIdAlreadyConsumed = 2300,
     SwapNotPerformed = 2301,
     UnauthorizedOperator = 2302,
-    UnauthorizedProxyWallet = 2303,
 }

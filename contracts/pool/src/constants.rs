@@ -1,2 +1,3 @@
 pub(crate) const COMPLETED_REQUESTS_PAGE_SIZE: u32 = 100;
 pub(crate) const DESTINATIONS_PAGE_SIZE: u32 = 100;
+pub(crate) const DEFAULT_MEMO: &str = "0000000000000000000000000000";

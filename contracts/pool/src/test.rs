@@ -1,5 +1,8 @@
 #![cfg(test)]
+
 use super::*;
+use crate::constants::DEFAULT_MEMO;
+use crate::memo::generate_next_memo;
 use crate::swap_router::swap_router;
 use soroban_sdk::testutils::arbitrary::std;
 use soroban_sdk::testutils::{
@@ -8,7 +11,7 @@ use soroban_sdk::testutils::{
 use soroban_sdk::token::{
     StellarAssetClient as SorobanTokenAdminClient, TokenClient as SorobanTokenClient,
 };
-use soroban_sdk::{vec, Address, BytesN, Env, IntoVal, Map, Symbol, Vec};
+use soroban_sdk::{vec, Address, BytesN, Env, IntoVal, String, Symbol, Vec};
 
 fn create_token_contract<'a>(e: &Env, admin: &Address) -> SorobanTokenClient<'a> {
     SorobanTokenClient::new(e, &e.register_stellar_asset_contract(admin.clone()))
@@ -53,6 +56,78 @@ fn deploy_swap_calculator_contract<'a>(e: &Env) -> swap_calculator::Client {
 fn deploy_swap_pool<'a>(e: &Env) -> PoolContractClient<'a> {
     let pool = PoolContractClient::new(e, &e.register_contract(None, PoolContract {}));
     pool
+}
+
+#[test]
+fn test_memo() {
+    let e = Env::default();
+    e.budget().reset_unlimited();
+    let swap_pool = deploy_swap_pool(&e);
+    let expected_memo = [
+        "0000000000000000000000000000",
+        "000000000000000000000000003e",
+        "000000000000000000000000006s",
+        "000000000000000000000000009G",
+        "00000000000000000000000000cU",
+    ];
+    let iterations = 1000;
+    let step = iterations / expected_memo.len();
+    for i in 0..iterations {
+        let user = Address::generate(&e);
+        let token = Address::generate(&e);
+        let memo = swap_pool.get_user_memo(&user, &token);
+        // println!("{:?}", memo.to_string());
+        if i % step == 0 {
+            assert_eq!(memo, String::from_str(&e, expected_memo[i / step]))
+        }
+    }
+}
+
+#[test]
+fn test_memo_generation() {
+    // memo should be unique for every user & token pair but should not change for the same pair
+    let e = Env::default();
+    e.budget().reset_unlimited();
+    let swap_pool = deploy_swap_pool(&e);
+    let user1 = Address::generate(&e);
+    let user2 = Address::generate(&e);
+    let token1 = Address::generate(&e);
+    let token2 = Address::generate(&e);
+    let memo1 = swap_pool.get_user_memo(&user1, &token1);
+    let memo2 = swap_pool.get_user_memo(&user1, &token2);
+    let memo3 = swap_pool.get_user_memo(&user2, &token1);
+    assert_ne!(memo1, memo2);
+    assert_ne!(memo1, memo3);
+    assert_ne!(memo2, memo3);
+    assert_eq!(memo1, swap_pool.get_user_memo(&user1, &token1));
+}
+
+#[test]
+fn test_memo_light() {
+    let e = Env::default();
+    let expected_memo = [
+        "0000000000000000000000000000",
+        "000000000000000000000001lUUE",
+        "000000000000000000000002HPPi",
+        "0000000000000000000000043KJW",
+        "000000000000000000000005pFEA",
+    ];
+    let iterations = 100_000_000_u64;
+    let step = iterations / expected_memo.len() as u64;
+    let mut default_memo = [0u8; 28];
+    for i in 0..DEFAULT_MEMO.len() {
+        default_memo[i] = DEFAULT_MEMO.as_bytes()[i];
+    }
+    let mut memo = default_memo;
+    for i in 0..iterations {
+        if i % step == 0 {
+            assert_eq!(
+                String::from_bytes(&e, &memo),
+                String::from_str(&e, expected_memo[(i / step) as usize])
+            )
+        }
+        memo = generate_next_memo(&memo);
+    }
 }
 
 #[test]
@@ -131,9 +206,7 @@ fn test_chained_swap() {
     swap_pool.mock_all_auths().set_admin(&admin);
     swap_pool.mock_all_auths().set_operator(&operator);
     swap_pool.mock_all_auths().set_swap_router(&router.address);
-    swap_pool
-        .mock_all_auths()
-        .add_proxy_wallet(&proxy_wallet, &tokens[2]);
+    swap_pool.mock_all_auths().set_proxy_wallet(&proxy_wallet);
 
     assert_eq!(token1.balance(&destination), 0);
     assert_eq!(token2.balance(&destination), 0);
@@ -163,6 +236,8 @@ fn test_chained_swap() {
     );
     assert_eq!(swap_pool.get_destinations(&0), Vec::new(&e));
 
+    let memo = swap_pool.get_user_memo(&destination, &tokens[2]);
+
     swap_pool
         .mock_auths(&[MockAuth {
             address: &operator,
@@ -173,10 +248,9 @@ fn test_chained_swap() {
                     &e,
                     [
                         operator.to_val(),
-                        proxy_wallet.to_val(),
                         BytesN::from_array(&e, &[0; 32]).into_val(&e),
                         operation_id.into_val(&e),
-                        destination.to_val(),
+                        memo.to_val(),
                         token_in.to_val(),
                         100_i128.into_val(&e),
                     ],
@@ -187,10 +261,9 @@ fn test_chained_swap() {
         }])
         .add_request(
             &operator,
-            &proxy_wallet,
             &BytesN::from_array(&e, &[0; 32]),
             &operation_id,
-            &destination,
+            &memo,
             &token_in,
             &100,
         );
@@ -351,7 +424,7 @@ fn test_duplicate_destination() {
     swap_pool.set_admin(&admin);
     swap_pool.set_operator(&operator);
     swap_pool.set_swap_router(&router.address);
-    swap_pool.add_proxy_wallet(&proxy_wallet, &tokens[1]);
+    swap_pool.set_proxy_wallet(&proxy_wallet);
 
     // approve tokens for proxy wallet & then lock it
     token1.approve(&proxy_wallet, &swap_pool.address, &i128::MAX, &9999);
@@ -359,6 +432,7 @@ fn test_duplicate_destination() {
     // init swap
     let mut operation_id = 1;
     let token_in = tokens[0].clone();
+    let token_out = tokens[1].clone();
     let swaps_chain = Vec::from_array(
         &e,
         [(tokens1.clone(), pool_index1.clone(), tokens[1].clone())],
@@ -367,12 +441,12 @@ fn test_duplicate_destination() {
 
     assert_eq!(swap_pool.get_destinations(&0), Vec::new(&e));
 
+    let memo = swap_pool.get_user_memo(&destination, &token_out);
     swap_pool.add_request(
         &operator,
-        &proxy_wallet,
         &BytesN::from_array(&e, &[0; 32]),
         &operation_id,
-        &destination,
+        &memo,
         &token_in,
         &100,
     );
@@ -381,10 +455,9 @@ fn test_duplicate_destination() {
     operation_id += 1;
     swap_pool.add_request(
         &operator,
-        &proxy_wallet,
         &BytesN::from_array(&e, &[0; 32]),
         &operation_id,
-        &destination,
+        &memo,
         &token_in,
         &100,
     );
@@ -395,74 +468,5 @@ fn test_duplicate_destination() {
     assert_eq!(
         swap_pool.get_destinations(&0),
         vec![&e, destination.clone()]
-    );
-}
-
-#[test]
-fn test_overwrite_wallet() {
-    let e = Env::default();
-    e.budget().reset_unlimited();
-    e.mock_all_auths();
-
-    let admin = Address::generate(&e);
-    let proxy_wallet1 = Address::generate(&e);
-    let proxy_wallet2 = Address::generate(&e);
-    let proxy_wallet3 = Address::generate(&e);
-    let token1 = create_token_contract(&e, &admin).address;
-    let token2 = create_token_contract(&e, &admin).address;
-
-    let swap_pool = deploy_swap_pool(&e);
-    swap_pool.set_admin(&admin);
-    swap_pool.add_proxy_wallet(&proxy_wallet1, &token1);
-    assert_eq!(
-        swap_pool.get_proxy_wallets(),
-        Map::from_array(&e, [(proxy_wallet1, token1.clone())])
-    );
-    swap_pool.add_proxy_wallet(&proxy_wallet2, &token1);
-    assert_eq!(
-        swap_pool.get_proxy_wallets(),
-        Map::from_array(&e, [(proxy_wallet2.clone(), token1.clone())])
-    );
-    swap_pool.add_proxy_wallet(&proxy_wallet3, &token2);
-    assert_eq!(
-        swap_pool.get_proxy_wallets(),
-        Map::from_array(
-            &e,
-            [
-                (proxy_wallet2, token1.clone()),
-                (proxy_wallet3, token2.clone())
-            ]
-        )
-    );
-}
-
-#[should_panic(expected = "Error(Contract, #2303)")]
-#[test]
-fn test_unregistered_proxy_wallet() {
-    let e = Env::default();
-    e.budget().reset_unlimited();
-    e.mock_all_auths();
-
-    let admin = Address::generate(&e);
-    let proxy_wallet = Address::generate(&e);
-    let operator = Address::generate(&e);
-    let destination = Address::generate(&e);
-    let token_in = create_token_contract(&e, &admin).address;
-    let token_out = create_token_contract(&e, &admin).address;
-
-    // init current contract
-    let swap_pool = deploy_swap_pool(&e);
-    swap_pool.set_admin(&admin);
-    swap_pool.set_operator(&operator);
-    swap_pool.add_proxy_wallet(&Address::generate(&e), &token_out);
-
-    swap_pool.add_request(
-        &operator,
-        &proxy_wallet,
-        &BytesN::from_array(&e, &[0; 32]),
-        &1,
-        &destination,
-        &token_in,
-        &100,
     );
 }
