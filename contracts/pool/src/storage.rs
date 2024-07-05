@@ -1,7 +1,6 @@
-use crate::constants::{COMPLETED_REQUESTS_PAGE_SIZE, DEFAULT_MEMO, DESTINATIONS_PAGE_SIZE};
-use crate::memo;
+use crate::constants::{COMPLETED_REQUESTS_PAGE_SIZE, DESTINATIONS_PAGE_SIZE};
 use paste::paste;
-use soroban_sdk::{contracttype, panic_with_error, Address, BytesN, Env, String, Vec};
+use soroban_sdk::{contracttype, panic_with_error, Address, BytesN, Env, Map, Vec};
 use utils::bump::{bump_instance, bump_persistent};
 use utils::storage_errors::StorageError;
 use utils::{
@@ -13,7 +12,7 @@ use utils::{
 #[derive(Clone)]
 #[contracttype]
 enum DataKey {
-    ProxyWallet,
+    ProxyWallets,
     Operator,
     SwapRouter,
     SwapRequests(Address),
@@ -22,9 +21,6 @@ enum DataKey {
     CompletedSwapRequestLastPage(Address),
     DestinationsList(u32),
     DestinationsLastPage,
-    UserMemo(Address, Address),
-    UserTokenByMemo(String),
-    NextMemo,
 }
 
 #[contracttype]
@@ -52,7 +48,7 @@ pub struct CompletedSwapRequest {
 
 generate_instance_storage_getter_and_setter!(operator, DataKey::Operator, Address);
 generate_instance_storage_getter_and_setter!(swap_router, DataKey::SwapRouter, Address);
-generate_instance_storage_getter_and_setter!(proxy_wallet, DataKey::ProxyWallet, Address);
+generate_instance_storage_getter_and_setter!(proxy_wallet, DataKey::ProxyWallets, Address);
 generate_instance_storage_getter_and_setter_with_default!(
     last_operation_id,
     DataKey::LastOperationId,
@@ -65,6 +61,36 @@ generate_instance_storage_getter_and_setter_with_default!(
     u32,
     0
 );
+
+pub fn get_proxy_wallets(e: &Env) -> Map<Address, Address> {
+    let key = DataKey::ProxyWallets;
+    match e.storage().persistent().get(&key) {
+        Some(v) => {
+            bump_persistent(e, &key);
+            v
+        }
+        None => Map::new(e),
+    }
+}
+
+fn set_proxy_wallets(e: &Env, value: &Map<Address, Address>) {
+    let key = DataKey::ProxyWallets;
+    e.storage().persistent().set(&key, value);
+    bump_persistent(e, &key);
+}
+
+// should we keep it in persistent storage rather than instance?
+pub fn add_proxy_wallet(e: &Env, proxy_wallet: &Address, token_out: &Address) {
+    let mut wallets = get_proxy_wallets(e);
+
+    for (k, v) in wallets.iter() {
+        if &v == token_out {
+            wallets.remove(k);
+        }
+    }
+    wallets.set(proxy_wallet.clone(), token_out.clone());
+    set_proxy_wallets(e, &wallets);
+}
 
 pub fn get_active_swap_requests(e: &Env, destination: &Address) -> Vec<SwapRequest> {
     let key = DataKey::SwapRequests(destination.clone());
@@ -216,83 +242,5 @@ pub fn add_destination(e: &Env, destination: &Address) {
     set_destinations(e, last_page, &destinations);
     if destinations.len() == DESTINATIONS_PAGE_SIZE {
         set_destinations_last_page(e, &(last_page + 1));
-    }
-}
-
-fn set_next_memo(e: &Env, value: &String) {
-    bump_instance(e);
-    let key = DataKey::NextMemo;
-    e.storage().instance().set(&key, value);
-}
-
-fn get_next_memo(e: &Env) -> String {
-    let key = DataKey::NextMemo;
-    match e.storage().instance().get(&key) {
-        Some(v) => v,
-        None => String::from_str(e, DEFAULT_MEMO),
-    }
-}
-
-pub fn set_user_token_by_memo(e: &Env, memo: &String, user: &Address, token: &Address) {
-    let key = DataKey::UserTokenByMemo(memo.clone());
-    e.storage().persistent().set(&key, &(user, token));
-    bump_persistent(e, &key);
-}
-
-pub fn get_user_token_by_memo(e: &Env, memo: &String) -> (Address, Address) {
-    let key = DataKey::UserTokenByMemo(memo.clone());
-    match e.storage().persistent().get(&key) {
-        Some(v) => {
-            bump_persistent(e, &key);
-            v
-        }
-        None => {
-            panic_with_error!(e, StorageError::ValueMissing)
-        }
-    }
-}
-
-pub fn set_user_memo(e: &Env, user: &Address, token: &Address, value: &String) {
-    let key = DataKey::UserMemo(user.clone(), token.clone());
-    e.storage().persistent().set(&key, value);
-    bump_persistent(e, &key);
-}
-
-fn generate_next_memo(e: &Env, memo_str: &String) -> String {
-    let mut memo_bytes = [0u8; 28];
-    memo_str.copy_into_slice(&mut memo_bytes);
-    String::from_bytes(e, &memo::generate_next_memo(&memo_bytes))
-}
-
-pub fn has_user_memo(e: &Env, user: &Address, token: &Address) -> bool {
-    let key = DataKey::UserMemo(user.clone(), token.clone());
-    e.storage().persistent().has(&key)
-}
-
-pub fn get_user_memo(e: &Env, user: &Address, token: &Address) -> String {
-    let key = DataKey::UserMemo(user.clone(), token.clone());
-    match e.storage().persistent().get(&key) {
-        Some(v) => {
-            bump_persistent(e, &key);
-            v
-        }
-        None => panic_with_error!(e, StorageError::ValueMissing),
-    }
-}
-
-pub fn get_or_generate_user_memo(e: &Env, user: &Address, token: &Address) -> String {
-    let key = DataKey::UserMemo(user.clone(), token.clone());
-    match e.storage().persistent().get(&key) {
-        Some(v) => {
-            bump_persistent(e, &key);
-            v
-        }
-        None => {
-            let memo = get_next_memo(e);
-            set_user_memo(e, user, token, &memo);
-            set_user_token_by_memo(e, &memo, user, token);
-            set_next_memo(e, &generate_next_memo(e, &memo));
-            memo
-        }
     }
 }

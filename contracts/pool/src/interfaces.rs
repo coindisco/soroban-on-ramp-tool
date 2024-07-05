@@ -1,20 +1,21 @@
-use soroban_sdk::{Address, BytesN, Env, String, Vec};
+use soroban_sdk::{Address, BytesN, Env, Map, Vec};
 
 pub trait PoolContractInterface {
     fn set_admin(e: Env, admin: Address);
 
     fn set_operator(e: Env, operator: Address);
-    fn set_proxy_wallet(e: Env, proxy_wallet: Address);
-    fn get_proxy_wallet(e: Env) -> Address;
+    fn add_proxy_wallet(e: Env, proxy_wallet: Address, token_out: Address);
+    fn get_proxy_wallets(e: Env) -> Map<Address, Address>;
 
     fn set_swap_router(e: Env, swap_router: Address);
 
     fn add_request(
         e: Env,
         operator: Address,
+        proxy_wallet: Address,
         tx_id: BytesN<32>,
         op_id: u128,
-        memo: String,
+        destination: Address,
         token_in: Address,
         amount_in: i128,
     );
@@ -44,9 +45,6 @@ pub trait PoolContractInterface {
     ) -> Vec<(BytesN<32>, u128, Address, Address, i128, Address, i128)>;
     fn get_destinations_last_page(e: Env) -> u32;
     fn get_destinations(e: Env, page: u32) -> Vec<Address>;
-    fn get_user_memo(e: Env, user: Address, token: Address) -> String;
-    fn has_user_memo(e: Env, user: Address, token: Address) -> bool;
-    fn generate_user_memo(e: Env, user: Address, token: Address) -> String;
 }
 
 pub trait UpgradeableContract {

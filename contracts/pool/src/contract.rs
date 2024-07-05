@@ -1,16 +1,19 @@
+use soroban_sdk::token::TokenClient as SorobanTokenClient;
+use soroban_sdk::{contract, contractimpl, panic_with_error, Address, BytesN, Env, Map, Vec};
+
+use access_control::access::{AccessControl, AccessControlTrait};
+
 use crate::errors::PoolError;
 use crate::interfaces::{PoolContractInterface, UpgradeableContract};
-use crate::storage::{
-    add_swap_request, get_active_swap_requests, get_completed_swap_requests_last_page,
-    get_completed_swap_requests_page, get_destinations, get_destinations_last_page,
-    get_last_operation_id, get_operator, get_or_generate_user_memo, get_proxy_wallet,
-    get_swap_request_by_id, get_swap_router, get_user_memo, get_user_token_by_memo, has_user_memo,
-    set_operator, set_proxy_wallet, set_swap_request_processed, set_swap_router, SwapRequest,
-};
 use crate::swap_router::swap_with_router;
-use access_control::access::{AccessControl, AccessControlTrait};
-use soroban_sdk::token::TokenClient as SorobanTokenClient;
-use soroban_sdk::{contract, contractimpl, panic_with_error, Address, BytesN, Env, String, Vec};
+
+use crate::storage::{
+    add_proxy_wallet, add_swap_request, get_active_swap_requests,
+    get_completed_swap_requests_last_page, get_completed_swap_requests_page, get_destinations,
+    get_destinations_last_page, get_last_operation_id, get_operator, get_proxy_wallets,
+    get_swap_request_by_id, get_swap_router, set_operator, set_swap_request_processed,
+    set_swap_router, SwapRequest,
+};
 
 #[contract]
 pub struct PoolContract;
@@ -32,10 +35,10 @@ impl PoolContractInterface for PoolContract {
         set_operator(&e, &operator);
     }
 
-    fn set_proxy_wallet(e: Env, proxy_wallet: Address) {
+    fn add_proxy_wallet(e: Env, proxy_wallet: Address, token_out: Address) {
         let access_control = AccessControl::new(&e);
         access_control.require_admin();
-        set_proxy_wallet(&e, &proxy_wallet);
+        add_proxy_wallet(&e, &proxy_wallet, &token_out);
     }
 
     fn set_swap_router(e: Env, swap_router: Address) {
@@ -44,26 +47,13 @@ impl PoolContractInterface for PoolContract {
         set_swap_router(&e, &swap_router);
     }
 
-    fn has_user_memo(e: Env, user: Address, token: Address) -> bool {
-        has_user_memo(&e, &user, &token)
-    }
-
-    fn get_user_memo(e: Env, user: Address, token: Address) -> String {
-        // don't generate user memo if it doesn't exist to avoid simulated memo which doesn't exist
-        get_user_memo(&e, &user, &token)
-    }
-
-    fn generate_user_memo(e: Env, user: Address, token: Address) -> String {
-        // explicit call to generate memo. if user is willing to pay twice - it's okay, duplicate won't be created
-        get_or_generate_user_memo(&e, &user, &token)
-    }
-
     fn add_request(
         e: Env,
         operator: Address,
+        proxy_wallet: Address,
         tx_id: BytesN<32>,
         op_id: u128,
-        memo: String,
+        destination: Address,
         token_in: Address,
         amount_in: i128,
     ) {
@@ -73,7 +63,13 @@ impl PoolContractInterface for PoolContract {
             panic_with_error!(&e, PoolError::UnauthorizedOperator);
         }
 
-        let (destination, token_out) = get_user_token_by_memo(&e, &memo);
+        let proxy_wallets = get_proxy_wallets(&e);
+        let token_out = match proxy_wallets.get(proxy_wallet.clone()) {
+            Some(value) => value,
+            None => {
+                panic_with_error!(&e, PoolError::UnauthorizedProxyWallet);
+            }
+        };
 
         // check if operation id already consumed
         if op_id <= get_last_operation_id(&e) {
@@ -82,7 +78,7 @@ impl PoolContractInterface for PoolContract {
 
         SorobanTokenClient::new(&e, &token_in).transfer_from(
             &e.current_contract_address(),
-            &get_proxy_wallet(&e),
+            &proxy_wallet,
             &e.current_contract_address(),
             &amount_in,
         );
@@ -144,8 +140,8 @@ impl PoolContractInterface for PoolContract {
     }
 
     // public getters
-    fn get_proxy_wallet(e: Env) -> Address {
-        get_proxy_wallet(&e)
+    fn get_proxy_wallets(e: Env) -> Map<Address, Address> {
+        get_proxy_wallets(&e)
     }
 
     fn get_last_operation_id(e: Env) -> u128 {

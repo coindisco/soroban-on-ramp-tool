@@ -4,7 +4,6 @@ mod constants;
 mod contract;
 mod errors;
 mod interfaces;
-mod memo;
 mod storage;
 mod swap_router;
 mod test;
