@@ -1,4 +1,5 @@
 use crate::constants::{COMPLETED_REQUESTS_PAGE_SIZE, DESTINATIONS_PAGE_SIZE};
+use crate::errors::PoolError;
 use paste::paste;
 use soroban_sdk::{contracttype, panic_with_error, Address, BytesN, Env, Map, Vec};
 use utils::bump::{bump_instance, bump_persistent};
@@ -14,6 +15,7 @@ use utils::{
 enum DataKey {
     ProxyWallets,
     Operator,
+    OperationalFee(Address),
     SwapRouter,
     SwapRequests(Address),
     LastOperationId,
@@ -243,4 +245,22 @@ pub fn add_destination(e: &Env, destination: &Address) {
     if destinations.len() == DESTINATIONS_PAGE_SIZE {
         set_destinations_last_page(e, &(last_page + 1));
     }
+}
+
+// operational fee per input token
+pub fn get_operational_fee(e: &Env, token: &Address) -> i128 {
+    let key = DataKey::OperationalFee(token.clone());
+    match e.storage().persistent().get(&key) {
+        Some(v) => {
+            bump_persistent(e, &key);
+            v
+        }
+        None => panic_with_error!(e, PoolError::TokenNotSupported),
+    }
+}
+
+pub fn set_operational_fee(e: &Env, token: &Address, value: &i128) {
+    let key = DataKey::OperationalFee(token.clone());
+    e.storage().persistent().set(&key, value);
+    bump_persistent(e, &key);
 }

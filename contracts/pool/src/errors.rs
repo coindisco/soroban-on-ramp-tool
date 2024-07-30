@@ -10,4 +10,5 @@ pub enum PoolError {
     SwapNotPerformed = 2301,
     UnauthorizedOperator = 2302,
     UnauthorizedProxyWallet = 2303,
+    TokenNotSupported = 2304,
 }

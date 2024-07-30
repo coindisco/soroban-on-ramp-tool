@@ -45,6 +45,9 @@ pub trait PoolContractInterface {
     ) -> Vec<(BytesN<32>, u128, Address, Address, i128, Address, i128)>;
     fn get_destinations_last_page(e: Env) -> u32;
     fn get_destinations(e: Env, page: u32) -> Vec<Address>;
+
+    fn get_operational_fee(e: Env, token: Address) -> i128;
+    fn set_operational_fee(e: Env, operator: Address, token: Address, fee: i128);
 }
 
 pub trait UpgradeableContract {

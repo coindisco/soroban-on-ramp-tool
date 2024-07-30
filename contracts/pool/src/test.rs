@@ -134,6 +134,9 @@ fn test_chained_swap() {
     swap_pool
         .mock_all_auths()
         .add_proxy_wallet(&proxy_wallet, &tokens[2]);
+    swap_pool
+        .mock_all_auths()
+        .set_operational_fee(&operator, &tokens[0], &42);
 
     assert_eq!(token1.balance(&destination), 0);
     assert_eq!(token2.balance(&destination), 0);
@@ -154,7 +157,7 @@ fn test_chained_swap() {
             (tokens2.clone(), pool_index2.clone(), tokens[2].clone()),
         ],
     );
-    token1_admin.mock_all_auths().mint(&proxy_wallet, &100);
+    token1_admin.mock_all_auths().mint(&proxy_wallet, &142);
 
     assert_eq!(swap_pool.get_requests(&destination), Vec::new(&e));
     assert_eq!(
@@ -178,7 +181,7 @@ fn test_chained_swap() {
                         operation_id.into_val(&e),
                         destination.to_val(),
                         token_in.to_val(),
-                        100_i128.into_val(&e),
+                        142_i128.into_val(&e),
                     ],
                 )
                 .into_val(&e),
@@ -192,7 +195,7 @@ fn test_chained_swap() {
             &operation_id,
             &destination,
             &token_in,
-            &100,
+            &142,
         );
 
     // check storage
@@ -210,6 +213,7 @@ fn test_chained_swap() {
             ),]
         )
     );
+    assert_eq!(token1.balance(&operator), 42);
     assert_eq!(swap_pool.get_completed_requests_last_page(&destination), 0);
     assert_eq!(
         swap_pool.get_completed_requests(&destination, &0),
@@ -352,6 +356,7 @@ fn test_duplicate_destination() {
     swap_pool.set_operator(&operator);
     swap_pool.set_swap_router(&router.address);
     swap_pool.add_proxy_wallet(&proxy_wallet, &tokens[1]);
+    swap_pool.set_operational_fee(&operator, &tokens[0], &0);
 
     // approve tokens for proxy wallet & then lock it
     token1.approve(&proxy_wallet, &swap_pool.address, &i128::MAX, &9999);
@@ -455,6 +460,47 @@ fn test_unregistered_proxy_wallet() {
     swap_pool.set_admin(&admin);
     swap_pool.set_operator(&operator);
     swap_pool.add_proxy_wallet(&Address::generate(&e), &token_out);
+
+    swap_pool.add_request(
+        &operator,
+        &proxy_wallet,
+        &BytesN::from_array(&e, &[0; 32]),
+        &1,
+        &destination,
+        &token_in,
+        &100,
+    );
+}
+
+#[should_panic(expected = "Error(Contract, #2304)")]
+#[test]
+fn test_unsupported_token_in() {
+    let e = Env::default();
+    e.budget().reset_unlimited();
+    e.mock_all_auths();
+
+    let admin = Address::generate(&e);
+    let proxy_wallet = Address::generate(&e);
+    let operator = Address::generate(&e);
+    let destination = Address::generate(&e);
+    let token_in = create_token_contract(&e, &admin).address;
+    let token_out = create_token_contract(&e, &admin).address;
+
+    // init current contract
+    let swap_pool = deploy_swap_pool(&e);
+    swap_pool.set_admin(&admin);
+    swap_pool.set_operator(&operator);
+    swap_pool.add_proxy_wallet(&proxy_wallet, &token_out);
+    swap_pool.set_operational_fee(&operator, &Address::generate(&e), &42);
+
+    // approve tokens for proxy wallet & then lock it
+    SorobanTokenAdminClient::new(&e, &token_in).mint(&proxy_wallet, &100);
+    SorobanTokenClient::new(&e, &token_in).approve(
+        &proxy_wallet,
+        &swap_pool.address,
+        &i128::MAX,
+        &9999,
+    );
 
     swap_pool.add_request(
         &operator,

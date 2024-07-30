@@ -10,9 +10,9 @@ use crate::swap_router::swap_with_router;
 use crate::storage::{
     add_proxy_wallet, add_swap_request, get_active_swap_requests,
     get_completed_swap_requests_last_page, get_completed_swap_requests_page, get_destinations,
-    get_destinations_last_page, get_last_operation_id, get_operator, get_proxy_wallets,
-    get_swap_request_by_id, get_swap_router, set_operator, set_swap_request_processed,
-    set_swap_router, SwapRequest,
+    get_destinations_last_page, get_last_operation_id, get_operational_fee, get_operator,
+    get_proxy_wallets, get_swap_request_by_id, get_swap_router, set_operational_fee, set_operator,
+    set_swap_request_processed, set_swap_router, SwapRequest,
 };
 
 #[contract]
@@ -76,12 +76,18 @@ impl PoolContractInterface for PoolContract {
             panic_with_error!(&e, PoolError::OperationIdAlreadyConsumed);
         }
 
-        SorobanTokenClient::new(&e, &token_in).transfer_from(
+        let token_in_client = SorobanTokenClient::new(&e, &token_in);
+        token_in_client.transfer_from(
             &e.current_contract_address(),
             &proxy_wallet,
             &e.current_contract_address(),
             &amount_in,
         );
+
+        let operational_fee = get_operational_fee(&e, &token_in);
+        if operational_fee > 0 {
+            token_in_client.transfer(&e.current_contract_address(), &operator, &operational_fee);
+        }
 
         add_swap_request(
             &e,
@@ -91,7 +97,7 @@ impl PoolContractInterface for PoolContract {
                 op_id,
                 destination: destination.clone(),
                 token_in,
-                amount_in,
+                amount_in: amount_in - operational_fee,
                 token_out,
             },
         );
@@ -196,6 +202,19 @@ impl PoolContractInterface for PoolContract {
 
     fn get_destinations(e: Env, page: u32) -> Vec<Address> {
         get_destinations(&e, page)
+    }
+
+    fn get_operational_fee(e: Env, token: Address) -> i128 {
+        get_operational_fee(&e, &token)
+    }
+
+    fn set_operational_fee(e: Env, operator: Address, token: Address, fee: i128) {
+        operator.require_auth();
+        if operator != get_operator(&e) {
+            panic_with_error!(&e, PoolError::UnauthorizedOperator);
+        }
+
+        set_operational_fee(&e, &token, &fee);
     }
 }
 
