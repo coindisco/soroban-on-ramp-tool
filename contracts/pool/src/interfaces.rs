@@ -28,9 +28,9 @@ pub trait PoolContractInterface {
         out_min: i128,
     ) -> i128; // public getters
     fn get_token_in(e: Env) -> Address; // getters
-               // get_swap by id
-               // get operator
-               // get swap router
+                                        // get_swap by id
+                                        // get operator
+                                        // get swap router
 
     fn get_last_operation_id(e: Env) -> u128;
     fn get_requests(

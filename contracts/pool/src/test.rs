@@ -130,7 +130,9 @@ fn test_chained_swap() {
     let swap_pool = deploy_swap_pool(&e);
     swap_pool.mock_all_auths().set_admin(&admin);
     swap_pool.mock_all_auths().set_operator(&admin, &operator);
-    swap_pool.mock_all_auths().set_swap_router(&admin, &router.address);
+    swap_pool
+        .mock_all_auths()
+        .set_swap_router(&admin, &router.address);
     swap_pool.mock_all_auths().set_token_in(&admin, &tokens[0]);
     swap_pool
         .mock_all_auths()

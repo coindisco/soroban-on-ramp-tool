@@ -7,7 +7,13 @@ use crate::errors::PoolError;
 use crate::interfaces::{PoolContractInterface, UpgradeableContract};
 use crate::swap_router::swap_with_router;
 
-use crate::storage::{add_swap_request, get_active_swap_requests, get_completed_swap_requests_last_page, get_completed_swap_requests_page, get_destinations, get_destinations_last_page, get_last_operation_id, get_operational_fee, get_operator, get_swap_request_by_id, get_swap_router, get_token_in, set_operational_fee, set_operator, set_swap_request_processed, set_swap_router, set_token_in, SwapRequest};
+use crate::storage::{
+    add_swap_request, get_active_swap_requests, get_completed_swap_requests_last_page,
+    get_completed_swap_requests_page, get_destinations, get_destinations_last_page,
+    get_last_operation_id, get_operational_fee, get_operator, get_swap_request_by_id,
+    get_swap_router, get_token_in, set_operational_fee, set_operator, set_swap_request_processed,
+    set_swap_router, set_token_in, SwapRequest,
+};
 
 #[contract]
 pub struct PoolContract;
