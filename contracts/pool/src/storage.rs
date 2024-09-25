@@ -1,7 +1,6 @@
 use crate::constants::{COMPLETED_REQUESTS_PAGE_SIZE, DESTINATIONS_PAGE_SIZE};
-use crate::errors::PoolError;
 use paste::paste;
-use soroban_sdk::{contracttype, panic_with_error, Address, BytesN, Env, Map, Vec};
+use soroban_sdk::{contracttype, panic_with_error, Address, BytesN, Env, Vec};
 use utils::bump::{bump_instance, bump_persistent};
 use utils::storage_errors::StorageError;
 use utils::{
@@ -13,10 +12,10 @@ use utils::{
 #[derive(Clone)]
 #[contracttype]
 enum DataKey {
-    ProxyWallets,
     Operator,
-    OperationalFee(Address),
+    OperationalFee,
     SwapRouter,
+    TokenIn,
     SwapRequests(Address),
     LastOperationId,
     CompletedSwapRequests(Address, u32),
@@ -31,7 +30,6 @@ pub struct SwapRequest {
     pub tx_id: BytesN<32>,
     pub op_id: u128,
     pub destination: Address,
-    pub token_in: Address,
     pub amount_in: i128,
     pub token_out: Address,
 }
@@ -42,7 +40,6 @@ pub struct CompletedSwapRequest {
     pub tx_id: BytesN<32>,
     pub op_id: u128,
     pub destination: Address,
-    pub token_in: Address,
     pub amount_in: i128,
     pub token_out: Address,
     pub amount_out: i128,
@@ -50,7 +47,7 @@ pub struct CompletedSwapRequest {
 
 generate_instance_storage_getter_and_setter!(operator, DataKey::Operator, Address);
 generate_instance_storage_getter_and_setter!(swap_router, DataKey::SwapRouter, Address);
-generate_instance_storage_getter_and_setter!(proxy_wallet, DataKey::ProxyWallets, Address);
+generate_instance_storage_getter_and_setter!(token_in, DataKey::TokenIn, Address);
 generate_instance_storage_getter_and_setter_with_default!(
     last_operation_id,
     DataKey::LastOperationId,
@@ -63,36 +60,12 @@ generate_instance_storage_getter_and_setter_with_default!(
     u32,
     0
 );
-
-pub fn get_proxy_wallets(e: &Env) -> Map<Address, Address> {
-    let key = DataKey::ProxyWallets;
-    match e.storage().persistent().get(&key) {
-        Some(v) => {
-            bump_persistent(e, &key);
-            v
-        }
-        None => Map::new(e),
-    }
-}
-
-fn set_proxy_wallets(e: &Env, value: &Map<Address, Address>) {
-    let key = DataKey::ProxyWallets;
-    e.storage().persistent().set(&key, value);
-    bump_persistent(e, &key);
-}
-
-// should we keep it in persistent storage rather than instance?
-pub fn add_proxy_wallet(e: &Env, proxy_wallet: &Address, token_out: &Address) {
-    let mut wallets = get_proxy_wallets(e);
-
-    for (k, v) in wallets.iter() {
-        if &v == token_out {
-            wallets.remove(k);
-        }
-    }
-    wallets.set(proxy_wallet.clone(), token_out.clone());
-    set_proxy_wallets(e, &wallets);
-}
+generate_instance_storage_getter_and_setter_with_default!(
+    operational_fee,
+    DataKey::OperationalFee,
+    i128,
+    0
+);
 
 pub fn get_active_swap_requests(e: &Env, destination: &Address) -> Vec<SwapRequest> {
     let key = DataKey::SwapRequests(destination.clone());
@@ -209,7 +182,6 @@ pub fn set_swap_request_processed(
                     tx_id: swap_request.tx_id,
                     op_id: swap_request.op_id,
                     destination: swap_request.destination,
-                    token_in: swap_request.token_in,
                     amount_in: swap_request.amount_in,
                     token_out: swap_request.token_out,
                     amount_out,
@@ -245,22 +217,4 @@ pub fn add_destination(e: &Env, destination: &Address) {
     if destinations.len() == DESTINATIONS_PAGE_SIZE {
         set_destinations_last_page(e, &(last_page + 1));
     }
-}
-
-// operational fee per input token
-pub fn get_operational_fee(e: &Env, token: &Address) -> i128 {
-    let key = DataKey::OperationalFee(token.clone());
-    match e.storage().persistent().get(&key) {
-        Some(v) => {
-            bump_persistent(e, &key);
-            v
-        }
-        None => panic_with_error!(e, PoolError::TokenNotSupported),
-    }
-}
-
-pub fn set_operational_fee(e: &Env, token: &Address, value: &i128) {
-    let key = DataKey::OperationalFee(token.clone());
-    e.storage().persistent().set(&key, value);
-    bump_persistent(e, &key);
 }
